@@ -19,6 +19,9 @@ if [ ! -f ${NAGIOS_HOME}/etc/htpasswd.users ] ; then
   chown -R nagios.nagios ${NAGIOS_HOME}/etc/htpasswd.users
 fi
 
+# fix permissions
+chown -R nagios.nagios ${NAGIOS_HOME}/etc
+
 shutdown() {
   echo Shutting Down
   ls /etc/service | SHELL=/bin/sh parallel --no-notice sv force-stop {}
