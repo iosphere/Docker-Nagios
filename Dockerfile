@@ -33,6 +33,7 @@ RUN	sed -i 's/universe/universe multiverse/' /etc/apt/sources.list	;\
 		snmp-mibs-downloader					\
 		php-cli							\
 		php-gd							\
+		php-xml							\
 		libgd2-xpm-dev						\
 		apache2							\
 		apache2-utils						\
