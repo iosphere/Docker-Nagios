@@ -138,6 +138,14 @@ RUN	cd /tmp											&&	\
 		--nagios-cgi-url /cgi-bin							&&	\
 	cp share/nagiosgraph.ssi ${NAGIOS_HOME}/share/ssi/common-header.ssi
 
+
+# nrdp server
+RUN cd /tmp \
+    && git clone https://github.com/NagiosEnterprises/nrdp.git -b 1.4.0 \
+    && cp -a nrdp/server ${NAGIOS_HOME}/share/nrdp \
+    && rm -rf nrdp
+
+
 RUN cd /opt &&		\
 	git clone https://github.com/willixix/naglio-plugins.git	WL-Nagios-Plugins	&&	\
 	git clone https://github.com/JasonRivers/nagios-plugins.git	JR-Nagios-Plugins	&&	\
