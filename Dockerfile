@@ -6,6 +6,7 @@ ENV NAGIOS_USER			nagios
 ENV NAGIOS_GROUP		nagios
 ENV NAGIOS_CMDUSER		nagios
 ENV NAGIOS_CMDGROUP		nagios
+ENV NAGIOS_FQDN			nagios.example.com
 ENV NAGIOSADMIN_USER		nagiosadmin
 ENV NAGIOSADMIN_PASS		nagios
 ENV APACHE_RUN_USER		nagios
@@ -16,12 +17,19 @@ ENV NG_NAGIOS_CONFIG_FILE	${NAGIOS_HOME}/etc/nagios.cfg
 ENV NG_CGI_DIR			${NAGIOS_HOME}/sbin
 ENV NG_WWW_DIR			${NAGIOS_HOME}/share/nagiosgraph
 ENV NG_CGI_URL			/cgi-bin
+ENV NAGIOS_BRANCH		nagios-4.3.2
+ENV NAGIOS_PLUGINS_BRANCH	release-2.2.1
+ENV NRPE_BRANCH			nrpe-3.1.1
 
 
-RUN	sed -i 's/universe/universe multiverse/' /etc/apt/sources.list	;\
+RUN	sed -i 's/universe/universe multiverse/' /etc/apt/sources.list	&& \
+	echo postfix postfix/main_mailer_type string "'Internet Site'" | debconf-set-selections && \
+	echo postfix postfix/mynetworks string "127.0.0.0/8" | debconf-set-selections && \
+	echo postfix postfix/mailname string ${NAGIOS_FQDN} | debconf-set-selections && \
 	apt-get update && apt-get install -y				\
 		iputils-ping						\
 		netcat							\
+		dnsutils						\
 		build-essential						\
 		automake						\
 		autoconf						\
@@ -42,6 +50,7 @@ RUN	sed -i 's/universe/universe multiverse/' /etc/apt/sources.list	;\
 		unzip							\
 		bc							\
 		postfix							\
+		rsyslog							\
 		bsd-mailx						\
 		libnet-snmp-perl					\
 		git							\
@@ -50,6 +59,7 @@ RUN	sed -i 's/universe/universe multiverse/' /etc/apt/sources.list	;\
 		librrds-perl						\
 		libgd-gd2-perl						\
 		libnagios-object-perl					\
+		libnagios-plugin-perl					\
 		fping							\
 		libfreeradius-client-dev				\
 		libnet-snmp-perl					\
@@ -79,16 +89,12 @@ RUN	cd /tmp							&&	\
 	make install						&&	\
 	make clean
 
-## The httpd.conf file has a problem in 4.3.0
-## cgibin is not referenced as part of the authentication
-## cgi-bin is not using the new authentication system, it's still on "basic"
-## This means you get 2 authentications and it still doesn't work.
-## We will patch this to work as we install
+## Nagios 4.3.1 has leftover debug code which spams syslog every 15 seconds
+## Its fixed in 4.3.2 and the patch can be removed then
 
-ADD httpd.conf.patch /tmp/
 	
 RUN	cd /tmp							&&	\
-	git clone https://github.com/NagiosEnterprises/nagioscore.git -b nagios-4.3.1		&&	\
+	git clone https://github.com/NagiosEnterprises/nagioscore.git -b $NAGIOS_BRANCH &&	\
 	cd nagioscore						&&	\
 	./configure							\
 		--prefix=${NAGIOS_HOME}					\
@@ -102,12 +108,11 @@ RUN	cd /tmp							&&	\
 	make install						&&	\
 	make install-config					&&	\
 	make install-commandmode				&&	\
-	SESSIONCRYPT=`cat /tmp/nagioscore/sample-config/httpd.conf | awk '/SessionCryptoPassphrase/ {print $2}' | tail -1`		&& \
 	make install-webconf					&&	\
 	make clean
 
 RUN	cd /tmp							&&	\
-	git clone https://github.com/nagios-plugins/nagios-plugins.git -b release-2.2.0		&&	\
+	git clone https://github.com/nagios-plugins/nagios-plugins.git -b $NAGIOS_PLUGINS_BRANCH		&&	\
 	cd nagios-plugins					&&	\
 	./tools/setup						&&	\
 	./configure							\
@@ -119,7 +124,7 @@ RUN	cd /tmp							&&	\
 	ln -sf /opt/nagios/libexec/utils.pm /usr/lib/nagios/plugins
 
 RUN	cd /tmp							&&	\
-	git clone https://github.com/NagiosEnterprises/nrpe.git	-b 3.0.1	&&	\
+	git clone https://github.com/NagiosEnterprises/nrpe.git	-b $NRPE_BRANCH	&&	\
 	cd nrpe							&&	\
 	./configure							\
 		--with-ssl=/usr/bin/openssl				\
@@ -176,7 +181,10 @@ RUN	mkdir -p -m 0755 /usr/share/snmp/mibs							&&	\
 RUN	sed -i 's,/bin/mail,/usr/bin/mail,' /opt/nagios/etc/objects/commands.cfg		&&	\
 	sed -i 's,/usr/usr,/usr,'           /opt/nagios/etc/objects/commands.cfg
 
-RUN	cp /etc/services /var/spool/postfix/etc/
+RUN	cp /etc/services /var/spool/postfix/etc/	&&\
+	echo "smtp_address_preference = ipv4" >> /etc/postfix/main.cf
+
+RUN	rm -rf /etc/rsyslog.d /etc/rsyslog.conf
 
 RUN	rm -rf /etc/sv/getty-5
 
@@ -185,6 +193,10 @@ ADD nagios/cgi.cfg /opt/nagios/etc/cgi.cfg
 ADD nagios/templates.cfg /opt/nagios/etc/objects/templates.cfg
 ADD nagios/commands.cfg /opt/nagios/etc/objects/commands.cfg
 ADD nagios/localhost.cfg /opt/nagios/etc/objects/localhost.cfg
+
+ADD rsyslog/rsyslog.conf /etc/rsyslog.conf
+
+RUN echo "use_timezone=${NAGIOS_TIMEZONE}" >> /opt/nagios/etc/nagios.cfg
 
 # Copy example config in-case the user has started with empty var or etc
 
@@ -201,6 +213,7 @@ RUN a2enmod session					&&\
 ADD nagios.init /etc/sv/nagios/run
 ADD apache.init /etc/sv/apache/run
 ADD postfix.init /etc/sv/postfix/run
+ADD rsyslog.init /etc/sv/rsyslog/run
 ADD start.sh /usr/local/bin/start_nagios
 RUN chmod +x /usr/local/bin/start_nagios
 
@@ -210,9 +223,11 @@ RUN ln -s /etc/sv/* /etc/service
 ENV APACHE_LOCK_DIR /var/run
 ENV APACHE_LOG_DIR /var/log/apache2
 
-#Set ServerName for Apache
-RUN echo "ServerName nagiosdocker" > /etc/apache2/conf-available/servername.conf	&& \
-    ln -s /etc/apache2/conf-available/servername.conf /etc/apache2/conf-enabled/servername.conf
+#Set ServerName and timezone for Apache
+RUN echo "ServerName ${NAGIOS_FQDN}" > /etc/apache2/conf-available/servername.conf	&& \
+    echo "PassEnv TZ" > /etc/apache2/conf-available/timezone.conf			&& \
+    ln -s /etc/apache2/conf-available/servername.conf /etc/apache2/conf-enabled/servername.conf	&& \
+    ln -s /etc/apache2/conf-available/timezone.conf /etc/apache2/conf-enabled/timezone.conf
 
 EXPOSE 80
 
