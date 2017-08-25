@@ -42,6 +42,9 @@ RUN	sed -i 's/universe/universe multiverse/' /etc/apt/sources.list	&& \
 		php-cli							\
 		php-gd							\
 		php-xml							\
+		python							\
+		python-boto							\
+		python-tornado							\
 		libgd2-xpm-dev						\
 		apache2							\
 		apache2-utils						\
